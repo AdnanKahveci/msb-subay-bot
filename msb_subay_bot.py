@@ -1,62 +1,36 @@
 import requests
 from bs4 import BeautifulSoup
 from telegram import Bot
-import time
-import json
-import os
+from telegram.ext import ApplicationBuilder, ContextTypes
+from telegram.ext import CommandHandler
+import asyncio
 
 # Telegram bot bilgilerini buraya yaz
 TELEGRAM_TOKEN = "8362907042:AAEFGa-3BLuUDxxx1qDd5DDuGyLxD313yy8"
 CHAT_ID = "6611448494"
 
-bot = Bot(token=TELEGRAM_TOKEN)
+URL = "https://personeltemin.msb.gov.tr/duyurular"
 
-# En son kontrol edilen duyuruyu kaydetmek için
-LAST_FILE = "last_announcement.json"
-
-def get_last_saved():
-    if os.path.exists(LAST_FILE):
-        with open(LAST_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {"last_title": ""}
-
-def save_last(title):
-    with open(LAST_FILE, "w", encoding="utf-8") as f:
-        json.dump({"last_title": title}, f, ensure_ascii=False, indent=2)
-
-def check_new_announcements():
-    url = "https://personeltemin.msb.gov.tr/"
-    r = requests.get(url, timeout=10)
-    soup = BeautifulSoup(r.text, "html.parser")
-
-    # Duyuru başlıklarını çek
-    announcements = soup.find_all("a", class_="duyuruBaslik")
-    if not announcements:
-        return None
-
-    latest = announcements[0]
-    title = latest.text.strip()
-    link = "https://personeltemin.msb.gov.tr/" + latest["href"]
-
-    data = get_last_saved()
-    if title != data["last_title"]:
-        save_last(title)
-        return {"title": title, "link": link}
-    return None
-
-def main():
-    print("Bot çalışıyor... MSB duyuruları kontrol ediliyor.")
+async def check_duyuru(app):
     while True:
         try:
-            new = check_new_announcements()
-            if new:
-                message = f"📢 *Yeni MSB Duyurusu Çıktı!*\n\n*{new['title']}*\n🔗 {new['link']}"
-                bot.send_message(chat_id=CHAT_ID, text=message, parse_mode="Markdown")
-                print("Yeni duyuru bulundu ve gönderildi.")
-            time.sleep(3600)  # 1 saatte bir kontrol et
+            r = requests.get(URL)
+            soup = BeautifulSoup(r.text, "html.parser")
+            duyurular = soup.find_all("a")
+            for d in duyurular:
+                text = d.get_text()
+                if "Muvazzaf Subay" in text:
+                    link = d.get("href")
+                    await app.bot.send_message(chat_id=CHAT_ID, text=f"Yeni duyuru: {text}\n{link}")
         except Exception as e:
             print("Hata:", e)
-            time.sleep(600)  # hata olursa 10 dk sonra tekrar dene
+        await asyncio.sleep(3600)  # 1 saatte bir kontrol
+
+async def start(update, context: ContextTypes.DEFAULT_TYPE):
+    await context.bot.send_message(chat_id=update.effective_chat.id, text="Bot çalışıyor!")
 
 if __name__ == "__main__":
-    main()
+    app = ApplicationBuilder().token(TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.create_task(check_duyuru(app))
+    app.run_polling()
