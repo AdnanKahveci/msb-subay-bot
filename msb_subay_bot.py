@@ -1,8 +1,16 @@
 import requests
 from bs4 import BeautifulSoup
-from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler
+from telegram.ext import Application, ContextTypes, CommandHandler
 import json
 import os
+import logging
+
+# Logging ayarla
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
 # Telegram bot bilgileri
 TELEGRAM_TOKEN = "8362907042:AAEFGa-3BLuUDxxx1qDd5DDuGyLxD313yy8"
@@ -24,12 +32,13 @@ def save_last(title):
 async def check_duyuru_job(context: ContextTypes.DEFAULT_TYPE):
     """Job queue ile çalışan duyuru kontrol fonksiyonu"""
     try:
+        logger.info("Duyurular kontrol ediliyor...")
         r = requests.get(URL, timeout=10)
         soup = BeautifulSoup(r.text, "html.parser")
         announcements = soup.find_all("a", class_="duyuruBaslik")
         
         if not announcements:
-            print("Duyuru bulunamadı.")
+            logger.warning("Duyuru bulunamadı.")
             return
 
         latest = announcements[0]
@@ -38,14 +47,14 @@ async def check_duyuru_job(context: ContextTypes.DEFAULT_TYPE):
 
         last = get_last_saved()
         
-        # İlk çalıştırma kontrolü - bot_data kullanarak
+        # İlk çalıştırma kontrolü
         if 'first_run' not in context.bot_data:
             context.bot_data['first_run'] = False
             if not last["last_title"]:
                 save_last(title)
-                print(f"İlk çalıştırma: Mevcut duyuru kaydedildi: {title}")
+                logger.info(f"İlk çalıştırma: Mevcut duyuru kaydedildi: {title}")
             else:
-                print(f"İlk çalıştırma: Son kaydedilen duyuru: {last['last_title']}")
+                logger.info(f"İlk çalıştırma: Son kaydedilen duyuru: {last['last_title']}")
             return
         
         # Yeni duyuru kontrolü
@@ -56,12 +65,12 @@ async def check_duyuru_job(context: ContextTypes.DEFAULT_TYPE):
                 text=f"📢 *Yeni MSB Duyurusu Çıktı!*\n\n*{title}*\n🔗 {link}",
                 parse_mode="Markdown"
             )
-            print(f"✅ Yeni duyuru bulundu ve gönderildi: {title}")
+            logger.info(f"✅ Yeni duyuru bulundu ve gönderildi: {title}")
         else:
-            print("Yeni duyuru yok.")
+            logger.info("Yeni duyuru yok.")
             
     except Exception as e:
-        print(f"❌ Hata: {e}")
+        logger.error(f"❌ Hata: {e}", exc_info=True)
 
 async def start(update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(
@@ -69,7 +78,7 @@ async def start(update, context: ContextTypes.DEFAULT_TYPE):
         text="✅ Bot çalışıyor! MSB duyuruları her saat kontrol ediliyor."
     )
 
-async def post_init(application):
+async def post_init(application: Application):
     """Bot başlatıldıktan sonra arka plan görevini başlat"""
     # Her saat tekrarlayan bir job ekle
     application.job_queue.run_repeating(
@@ -78,19 +87,23 @@ async def post_init(application):
         first=10,  # İlk kontrolü 10 saniye sonra yap
         name="duyuru_checker"
     )
-    print("🚀 Bot başlatıldı, duyuru kontrolü her saat yapılacak!")
+    logger.info("🚀 Bot başlatıldı, duyuru kontrolü her saat yapılacak!")
 
-if __name__ == "__main__":
+def main():
+    """Ana fonksiyon"""
     # Application oluştur
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+    application = Application.builder().token(TELEGRAM_TOKEN).build()
     
     # Komut handler'ı ekle
-    app.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("start", start))
     
     # post_init callback'i ayarla
-    app.post_init = post_init
+    application.post_init = post_init
     
-    print("🤖 Bot başlatılıyor...")
+    logger.info("🤖 Bot başlatılıyor...")
     
     # Bot'u çalıştır
-    app.run_polling(allowed_updates=["message"])
+    application.run_polling(allowed_updates=["message"])
+
+if __name__ == "__main__":
+    main()
