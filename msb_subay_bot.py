@@ -12,28 +12,22 @@ CHAT_ID = "6611448494"
 URL = "https://personeltemin.msb.gov.tr/duyurular"
 LAST_FILE = "last_announcement.json"
 
-
-# Son duyuruyu kaydetmek için
 def get_last_saved():
     if os.path.exists(LAST_FILE):
         with open(LAST_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
     return {"last_title": ""}
 
-
 def save_last(title):
     with open(LAST_FILE, "w", encoding="utf-8") as f:
         json.dump({"last_title": title}, f, ensure_ascii=False, indent=2)
 
-
-# Duyuruları kontrol eden async görev
 async def check_duyuru(app):
     while True:
         try:
             r = requests.get(URL, timeout=10)
             soup = BeautifulSoup(r.text, "html.parser")
             announcements = soup.find_all("a", class_="duyuruBaslik")
-
             if not announcements:
                 await asyncio.sleep(3600)
                 continue
@@ -53,22 +47,18 @@ async def check_duyuru(app):
                 print("Yeni duyuru bulundu ve gönderildi.")
         except Exception as e:
             print("Hata:", e)
+        await asyncio.sleep(3600)
 
-        await asyncio.sleep(3600)  # 1 saatte bir kontrol
-
-
-# /start komutu
 async def start(update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(chat_id=update.effective_chat.id, text="Bot çalışıyor!")
 
-
-# Ana async loop
-async def main():
+if __name__ == "__main__":
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
-    app.create_task(check_duyuru(app))  # async görev
-    await app.run_polling()
 
+    # Bot başlatıldıktan sonra async görev ekle
+    async def on_startup(app):
+        app.create_task(check_duyuru(app))
 
-if __name__ == "__main__":
-    asyncio.run(main())
+    app.post_init(on_startup)
+    app.run_polling()  # asyncio.run() kullanmaya gerek yok
