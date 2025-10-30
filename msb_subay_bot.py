@@ -1,10 +1,7 @@
 import requests
 from bs4 import BeautifulSoup
-from telegram import Bot
-from telegram.ext import ApplicationBuilder, ContextTypes
-from telegram.ext import CommandHandler
+from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler
 import asyncio
-
 # Telegram bot bilgilerini buraya yaz
 TELEGRAM_TOKEN = "8362907042:AAEFGa-3BLuUDxxx1qDd5DDuGyLxD313yy8"
 CHAT_ID = "6611448494"
@@ -30,7 +27,7 @@ async def start(update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(chat_id=update.effective_chat.id, text="Bot çalışıyor!")
 
 if __name__ == "__main__":
-    app = ApplicationBuilder().token(TOKEN).build()
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.create_task(check_duyuru(app))
     app.run_polling()
