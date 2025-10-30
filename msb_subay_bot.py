@@ -4,6 +4,7 @@ from telegram.ext import Application, ContextTypes, CommandHandler
 import json
 import os
 import logging
+import asyncio
 
 # Logging ayarla
 logging.basicConfig(
@@ -29,48 +30,56 @@ def save_last(title):
     with open(LAST_FILE, "w", encoding="utf-8") as f:
         json.dump({"last_title": title}, f, ensure_ascii=False, indent=2)
 
-async def check_duyuru_job(context: ContextTypes.DEFAULT_TYPE):
-    """Job queue ile çalışan duyuru kontrol fonksiyonu"""
-    try:
-        logger.info("Duyurular kontrol ediliyor...")
-        r = requests.get(URL, timeout=10)
-        soup = BeautifulSoup(r.text, "html.parser")
-        announcements = soup.find_all("a", class_="duyuruBaslik")
-        
-        if not announcements:
-            logger.warning("Duyuru bulunamadı.")
-            return
+# Global değişken
+first_run = True
 
-        latest = announcements[0]
-        title = latest.get_text().strip()
-        link = "https://personeltemin.msb.gov.tr" + latest["href"]
-
-        last = get_last_saved()
-        
-        # İlk çalıştırma kontrolü
-        if 'first_run' not in context.bot_data:
-            context.bot_data['first_run'] = False
-            if not last["last_title"]:
-                save_last(title)
-                logger.info(f"İlk çalıştırma: Mevcut duyuru kaydedildi: {title}")
-            else:
-                logger.info(f"İlk çalıştırma: Son kaydedilen duyuru: {last['last_title']}")
-            return
-        
-        # Yeni duyuru kontrolü
-        if title != last["last_title"]:
-            save_last(title)
-            await context.bot.send_message(
-                chat_id=CHAT_ID,
-                text=f"📢 *Yeni MSB Duyurusu Çıktı!*\n\n*{title}*\n🔗 {link}",
-                parse_mode="Markdown"
-            )
-            logger.info(f"✅ Yeni duyuru bulundu ve gönderildi: {title}")
-        else:
-            logger.info("Yeni duyuru yok.")
+async def check_duyuru_loop(application: Application):
+    """Sürekli çalışan duyuru kontrol döngüsü"""
+    global first_run
+    
+    while True:
+        try:
+            logger.info("Duyurular kontrol ediliyor...")
+            r = requests.get(URL, timeout=10)
+            soup = BeautifulSoup(r.text, "html.parser")
+            announcements = soup.find_all("a", class_="duyuruBaslik")
             
-    except Exception as e:
-        logger.error(f"❌ Hata: {e}", exc_info=True)
+            if not announcements:
+                logger.warning("Duyuru bulunamadı.")
+                await asyncio.sleep(3600)
+                continue
+
+            latest = announcements[0]
+            title = latest.get_text().strip()
+            link = "https://personeltemin.msb.gov.tr" + latest["href"]
+
+            last = get_last_saved()
+            
+            # İlk çalıştırma kontrolü
+            if first_run:
+                first_run = False
+                if not last["last_title"]:
+                    save_last(title)
+                    logger.info(f"İlk çalıştırma: Mevcut duyuru kaydedildi: {title}")
+                else:
+                    logger.info(f"İlk çalıştırma: Son kaydedilen duyuru: {last['last_title']}")
+            # Yeni duyuru kontrolü
+            elif title != last["last_title"]:
+                save_last(title)
+                await application.bot.send_message(
+                    chat_id=CHAT_ID,
+                    text=f"📢 *Yeni MSB Duyurusu Çıktı!*\n\n*{title}*\n🔗 {link}",
+                    parse_mode="Markdown"
+                )
+                logger.info(f"✅ Yeni duyuru bulundu ve gönderildi: {title}")
+            else:
+                logger.info("Yeni duyuru yok.")
+                
+        except Exception as e:
+            logger.error(f"❌ Hata: {e}", exc_info=True)
+        
+        # 1 saat bekle
+        await asyncio.sleep(3600)
 
 async def start(update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(
@@ -80,13 +89,8 @@ async def start(update, context: ContextTypes.DEFAULT_TYPE):
 
 async def post_init(application: Application):
     """Bot başlatıldıktan sonra arka plan görevini başlat"""
-    # Her saat tekrarlayan bir job ekle
-    application.job_queue.run_repeating(
-        check_duyuru_job,
-        interval=3600,  # 3600 saniye = 1 saat
-        first=10,  # İlk kontrolü 10 saniye sonra yap
-        name="duyuru_checker"
-    )
+    # Arka plan görevini başlat
+    asyncio.create_task(check_duyuru_loop(application))
     logger.info("🚀 Bot başlatıldı, duyuru kontrolü her saat yapılacak!")
 
 def main():
@@ -103,7 +107,10 @@ def main():
     logger.info("🤖 Bot başlatılıyor...")
     
     # Bot'u çalıştır
-    application.run_polling(allowed_updates=["message"])
+    application.run_polling(
+        allowed_updates=["message"],
+        drop_pending_updates=True
+    )
 
 if __name__ == "__main__":
     main()
