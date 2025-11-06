@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 TELEGRAM_TOKEN = "8362907042:AAEFGa-3BLuUDxxx1qDd5DDuGyLxD313yy8"
 CHAT_ID = "6611448494"
-URL = "https://personeltemin.msb.gov.tr/duyurular"
+URL = "https://personeltemin.msb.gov.tr/Anasayfa/Duyurular"
 LAST_FILE = "last_announcement.json"
 PORT = int(os.environ.get('PORT', 10000))
 
