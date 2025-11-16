@@ -29,21 +29,31 @@ def save_last(title):
     with open(LAST_FILE, "w", encoding="utf-8") as f:
         json.dump({"last_title": title}, f, ensure_ascii=False, indent=2)
 
-first_run = True
-
 async def check_duyuru_loop(application: Application):
-    global first_run
+    # İlk başta bilgilendirme mesajı gönder
+    try:
+        await application.bot.send_message(
+            chat_id=CHAT_ID,
+            text="🚀 *Bot Başlatıldı!*\n\nDuyuru kontrolü başlıyor...\n⏰ Kontrol sıklığı: Her 1 saat",
+            parse_mode="Markdown"
+        )
+        logger.info("✅ Başlangıç mesajı gönderildi")
+    except Exception as e:
+        logger.error(f"❌ Başlangıç mesajı hatası: {e}")
+    
     await asyncio.sleep(10)
+    
+    first_check = True
     
     while True:
         try:
-            logger.info("Duyurular kontrol ediliyor...")
+            logger.info("📡 Duyurular kontrol ediliyor...")
             r = requests.get(URL, timeout=10)
             soup = BeautifulSoup(r.text, "html.parser")
             announcements = soup.find_all("a", class_="duyuruBaslik")
             
             if not announcements:
-                logger.warning("Duyuru bulunamadı.")
+                logger.warning("⚠️ Duyuru bulunamadı.")
                 await asyncio.sleep(3600)
                 continue
 
@@ -52,48 +62,107 @@ async def check_duyuru_loop(application: Application):
             link = "https://personeltemin.msb.gov.tr" + latest["href"]
             last = get_last_saved()
             
-            if first_run:
-                first_run = False
+            logger.info(f"📄 Bulunan duyuru: {title}")
+            logger.info(f"💾 Kayıtlı duyuru: {last.get('last_title', 'Yok')}")
+            
+            # İlk kontrol - sadece kaydet, mesaj gönderme
+            if first_check:
+                first_check = False
                 if not last["last_title"]:
+                    # Hiç kayıt yoksa, şimdiki duyuruyu kaydet
                     save_last(title)
-                    logger.info(f"İlk çalıştırma: Mevcut duyuru kaydedildi: {title}")
+                    logger.info(f"💾 İlk kayıt: {title}")
+                    await application.bot.send_message(
+                        chat_id=CHAT_ID,
+                        text=f"💾 *İlk Kayıt Yapıldı*\n\nMevcut duyuru kaydedildi. Bundan sonra yeni duyuru çıktığında bildirim alacaksınız.\n\n_{title}_",
+                        parse_mode="Markdown"
+                    )
                 else:
-                    logger.info(f"İlk çalıştırma: Son kaydedilen duyuru: {last['last_title']}")
-            elif title != last["last_title"]:
+                    logger.info(f"✅ Kayıtlı duyuru mevcut: {last['last_title']}")
+                    # Eğer farklıysa, yeni duyuru var demektir
+                    if title != last["last_title"]:
+                        save_last(title)
+                        await application.bot.send_message(
+                            chat_id=CHAT_ID,
+                            text=f"📢 *Yeni MSB Duyurusu Çıktı!*\n\n*{title}*\n\n🔗 {link}",
+                            parse_mode="Markdown"
+                        )
+                        logger.info(f"🎉 İlk kontrolde yeni duyuru bulundu ve gönderildi!")
+                continue
+            
+            # Sonraki kontroller - değişiklik varsa bildir
+            if title != last["last_title"]:
                 save_last(title)
-                await application.bot.send_message(
-                    chat_id=CHAT_ID,
-                    text=f"📢 *Yeni MSB Duyurusu Çıktı!*\n\n*{title}*\n🔗 {link}",
-                    parse_mode="Markdown"
-                )
-                logger.info(f"✅ Yeni duyuru bulundu ve gönderildi: {title}")
+                try:
+                    await application.bot.send_message(
+                        chat_id=CHAT_ID,
+                        text=f"📢 *Yeni MSB Duyurusu Çıktı!*\n\n*{title}*\n\n🔗 {link}",
+                        parse_mode="Markdown"
+                    )
+                    logger.info(f"✅ Yeni duyuru bildirildi: {title}")
+                except Exception as e:
+                    logger.error(f"❌ Bildirim gönderilemedi: {e}")
             else:
-                logger.info("Yeni duyuru yok.")
+                logger.info("ℹ️ Yeni duyuru yok.")
+                
         except Exception as e:
-            logger.error(f"❌ Hata: {e}", exc_info=True)
+            logger.error(f"❌ Kontrol hatası: {e}", exc_info=True)
         
+        logger.info("⏰ 1 saat bekleniyor...")
         await asyncio.sleep(3600)
 
 async def health_check(request):
-    """Health check endpoint - Render'ın kontrol etmesi için"""
     return web.Response(text="✅ MSB Bot is running!", content_type="text/plain")
 
 async def status(request):
-    """Bot durumu endpoint"""
     last = get_last_saved()
-    status_text = f"""
-    🤖 MSB Duyuru Bot Durumu
+    status_text = f"""🤖 MSB Duyuru Bot Durumu
     
-    Son Kontrol Edilen Duyuru: {last.get('last_title', 'Henüz kontrol edilmedi')}
-    Bot Durumu: Aktif ✅
-    Kontrol Sıklığı: Her 1 saat
-    """
+Son Kontrol Edilen Duyuru: 
+{last.get('last_title', 'Henüz kontrol edilmedi')}
+
+Bot Durumu: Aktif ✅
+Kontrol Sıklığı: Her 1 saat
+Chat ID: {CHAT_ID}
+"""
     return web.Response(text=status_text, content_type="text/plain")
+
+async def check_command(update, context: ContextTypes.DEFAULT_TYPE):
+    """Manuel kontrol komutu"""
+    await update.message.reply_text("🔍 Duyurular kontrol ediliyor...")
+    try:
+        r = requests.get(URL, timeout=10)
+        soup = BeautifulSoup(r.text, "html.parser")
+        announcements = soup.find_all("a", class_="duyuruBaslik")
+        
+        if announcements:
+            latest = announcements[0]
+            title = latest.get_text().strip()
+            link = "https://personeltemin.msb.gov.tr" + latest["href"]
+            last = get_last_saved()
+            
+            if title == last.get("last_title"):
+                await update.message.reply_text(f"ℹ️ *Güncel Duyuru*\n\n{title}\n\n🔗 {link}", parse_mode="Markdown")
+            else:
+                await update.message.reply_text(f"🆕 *Yeni Duyuru Tespit Edildi!*\n\n{title}\n\n🔗 {link}", parse_mode="Markdown")
+        else:
+            await update.message.reply_text("⚠️ Duyuru bulunamadı.")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Hata: {e}")
+
+async def reset_command(update, context: ContextTypes.DEFAULT_TYPE):
+    """Kayıtlı duyuruyu sıfırla"""
+    if os.path.exists(LAST_FILE):
+        os.remove(LAST_FILE)
+        await update.message.reply_text("🗑️ Kayıtlı duyuru silindi. Bir sonraki kontrolde mevcut duyuru kaydedilecek.")
+    else:
+        await update.message.reply_text("ℹ️ Zaten kayıtlı duyuru yok.")
 
 async def start_command(update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(
         chat_id=update.effective_chat.id, 
-        text="✅ Bot çalışıyor! MSB duyuruları her saat kontrol ediliyor."
+        text="✅ *Bot Çalışıyor!*\n\nKomutlar:\n/check - Manuel kontrol\n/reset - Kayıtlı duyuruyu sıfırla",
+        parse_mode="Markdown"
     )
 
 async def post_init(application: Application):
@@ -101,12 +170,12 @@ async def post_init(application: Application):
     logger.info("🚀 Duyuru kontrol görevi başlatıldı!")
 
 async def start_bot(app_web):
-    """Telegram botunu başlat"""
     application = Application.builder().token(TELEGRAM_TOKEN).build()
     application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CommandHandler("check", check_command))
+    application.add_handler(CommandHandler("reset", reset_command))
     application.post_init = post_init
     
-    # Bot'u başlat ama polling'i manuel yönet
     await application.initialize()
     await application.start()
     await application.updater.start_polling(
@@ -114,12 +183,10 @@ async def start_bot(app_web):
         drop_pending_updates=True
     )
     
-    # Web app'e bot'u ekle (temizlik için)
     app_web['bot'] = application
     logger.info("🤖 Telegram bot başlatıldı!")
 
 async def cleanup(app_web):
-    """Temizlik işlemleri"""
     if 'bot' in app_web:
         await app_web['bot'].updater.stop()
         await app_web['bot'].stop()
@@ -127,19 +194,15 @@ async def cleanup(app_web):
         logger.info("Bot kapatıldı")
 
 def main():
-    # Web uygulaması oluştur
     app_web = web.Application()
     app_web.router.add_get('/', health_check)
     app_web.router.add_get('/health', health_check)
     app_web.router.add_get('/status', status)
     
-    # Startup ve cleanup
     app_web.on_startup.append(start_bot)
     app_web.on_cleanup.append(cleanup)
     
     logger.info(f"🌐 Web sunucusu port {PORT}'da başlatılıyor...")
-    
-    # Web sunucusunu çalıştır
     web.run_app(app_web, host='0.0.0.0', port=PORT)
 
 if __name__ == "__main__":
